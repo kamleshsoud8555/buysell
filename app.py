@@ -8,8 +8,8 @@ from datetime import timedelta
 
 st.set_page_config(page_title="Advanced Market Trend Predictor", page_icon="📈", layout="wide")
 
-st.title("📈 Indian Market Trend Predictor (Pro Version)")
-st.markdown("### Stocks | MCX | Nifty 50 | Sensex | RSI + MACD + EMA + Buy/Sell Signal")
+st.title("📈 Indian Market Trend Predictor (Pro + Probability)")
+st.markdown("### Stocks | MCX | Nifty 50 | Sensex | RSI + MACD + EMA + Probability Score")
 
 # ====================== SYMBOL MAPPING ======================
 name_to_symbol = {
@@ -37,8 +37,7 @@ def calculate_macd(series, fast=12, slow=26, signal=9):
     ema_slow = series.ewm(span=slow, adjust=False).mean()
     macd_line = ema_fast - ema_slow
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram = macd_line - signal_line
-    return macd_line, signal_line, histogram
+    return macd_line, signal_line
 
 def calculate_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
@@ -75,16 +74,66 @@ if st.button("Get Future Trend", type="primary") or user_input:
             data["EMA20"] = calculate_ema(close, 20)
             data["EMA50"] = calculate_ema(close, 50)
             data["EMA200"] = calculate_ema(close, 200)
-            data["MACD"], data["MACD_Signal"], data["MACD_Hist"] = calculate_macd(close)
+            data["MACD"], data["MACD_Signal"] = calculate_macd(close)
 
-            rsi = data["RSI"].iloc[-1]
-            ema20 = data["EMA20"].iloc[-1]
-            ema50 = data["EMA50"].iloc[-1]
-            ema200 = data["EMA200"].iloc[-1]
-            macd = data["MACD"].iloc[-1]
-            macd_signal = data["MACD_Signal"].iloc[-1]
+            rsi = float(data["RSI"].iloc[-1])
+            ema20 = float(data["EMA20"].iloc[-1])
+            ema50 = float(data["EMA50"].iloc[-1])
+            ema200 = float(data["EMA200"].iloc[-1])
+            macd = float(data["MACD"].iloc[-1])
+            macd_signal = float(data["MACD_Signal"].iloc[-1])
 
-            # ========== HEADER ==========
+            # ========== SCORING SYSTEM ==========
+            bullish_score = 0
+            bearish_score = 0
+
+            # RSI
+            if rsi < 35:
+                bullish_score += 2
+            elif rsi < 45:
+                bullish_score += 1
+            elif rsi > 65:
+                bearish_score += 2
+            elif rsi > 55:
+                bearish_score += 1
+
+            # MACD
+            if macd > macd_signal:
+                bullish_score += 2
+            else:
+                bearish_score += 2
+
+            # EMA Alignment
+            if current_price > ema20 > ema50:
+                bullish_score += 2
+            elif current_price < ema20 < ema50:
+                bearish_score += 2
+
+            if current_price > ema200:
+                bullish_score += 1
+            else:
+                bearish_score += 1
+
+            total = bullish_score + bearish_score
+            if total == 0:
+                total = 1
+
+            bullish_prob = int((bullish_score / total) * 100)
+            bearish_prob = 100 - bullish_prob
+
+            # Final Signal
+            if bullish_prob >= 70:
+                final_signal = "🟢 STRONG BUY"
+            elif bullish_prob >= 55:
+                final_signal = "🟡 BUY"
+            elif bearish_prob >= 70:
+                final_signal = "🔴 STRONG SELL"
+            elif bearish_prob >= 55:
+                final_signal = "🟠 SELL"
+            else:
+                final_signal = "⚪ WAIT / SIDEWAYS"
+
+            # ========== DISPLAY ==========
             if ticker == "^NSEI":
                 st.success("✅ Analyzing **Nifty 50**")
             elif ticker == "^BSESN":
@@ -94,96 +143,41 @@ if st.button("Get Future Trend", type="primary") or user_input:
             else:
                 st.success(f"✅ Found: **{ticker}**")
 
-            # ========== BASIC METRICS ==========
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Current Price / Level", f"{current_price:.2f}")
+            # Main Metrics
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Current Price", f"{current_price:.2f}")
+            col2.metric("Final Signal", final_signal)
+            col3.metric("Bullish Probability", f"{bullish_prob}%")
+            col4.metric("Bearish Probability", f"{bearish_prob}%")
 
-            # Trend from price
-            recent = close.iloc[-20:].mean()
-            previous = close.iloc[-40:-20].mean()
-            if recent > previous * 1.02:
-                price_trend = "Bullish"
-            elif recent < previous * 0.98:
-                price_trend = "Bearish"
-            else:
-                price_trend = "Sideways"
-            col2.metric("Price Trend", price_trend)
+            # Progress bar for probability
+            st.progress(bullish_prob / 100)
+            st.caption(f"Bullish Confidence: {bullish_prob}%  |  Bearish Confidence: {bearish_prob}%")
 
-            # ========== BUY / SELL / WAIT SIGNAL ==========
-            buy_signals = 0
-            sell_signals = 0
-
-            # RSI conditions
-            if rsi < 35:
-                buy_signals += 1
-            elif rsi > 65:
-                sell_signals += 1
-
-            # MACD conditions
-            if macd > macd_signal:
-                buy_signals += 1
-            else:
-                sell_signals += 1
-
-            # EMA conditions
-            if current_price > ema20 > ema50:
-                buy_signals += 1
-            elif current_price < ema20 < ema50:
-                sell_signals += 1
-
-            if current_price > ema200:
-                buy_signals += 0.5
-            else:
-                sell_signals += 0.5
-
-            # Final Signal
-            if buy_signals >= 2.5:
-                final_signal = "🟢 STRONG BUY"
-                signal_color = "green"
-            elif buy_signals >= 1.5:
-                final_signal = "🟡 BUY"
-                signal_color = "orange"
-            elif sell_signals >= 2.5:
-                final_signal = "🔴 STRONG SELL"
-                signal_color = "red"
-            elif sell_signals >= 1.5:
-                final_signal = "🟠 SELL"
-                signal_color = "darkorange"
-            else:
-                final_signal = "⚪ WAIT / SIDEWAYS"
-                signal_color = "gray"
-
-            col3.metric("Final Signal", final_signal)
-
-            # ========== DETAILED INDICATORS ==========
+            # Indicators
             st.subheader("📊 Technical Indicators")
-
             ic1, ic2, ic3, ic4 = st.columns(4)
-            ic1.metric("RSI (14)", f"{rsi:.1f}", 
-                       "Oversold" if rsi < 30 else ("Overbought" if rsi > 70 else "Neutral"))
-            ic2.metric("MACD", f"{macd:.2f}", 
-                       "Bullish" if macd > macd_signal else "Bearish")
+            ic1.metric("RSI (14)", f"{rsi:.1f}", "Oversold" if rsi < 30 else ("Overbought" if rsi > 70 else "Neutral"))
+            ic2.metric("MACD", f"{macd:.2f}", "Bullish" if macd > macd_signal else "Bearish")
             ic3.metric("EMA 20", f"{ema20:.2f}")
             ic4.metric("EMA 50", f"{ema50:.2f}")
+            st.caption(f"EMA 200: {ema200:.2f} → Price is {'Above' if current_price > ema200 else 'Below'} EMA 200")
 
-            st.caption(f"EMA 200: {ema200:.2f} | Price vs EMA200: {'Above (Bullish)' if current_price > ema200 else 'Below (Bearish)'}")
+            # Support / Resistance + Risk
+            st.subheader("🛡️ Support, Resistance & Risk Management")
 
-            # ========== SUPPORT & RESISTANCE + RISK ==========
-            st.subheader("🛡️ Support, Resistance & Risk Levels")
+            high = data["High"].iloc[-1]
+            low = data["Low"].iloc[-1]
+            pivot = (high + low + current_price) / 3
+            r1 = (2 * pivot) - low
+            s1 = (2 * pivot) - high
 
-            high_20 = data["High"].tail(20).max()
-            low_20 = data["Low"].tail(20).min()
-            pivot = (data["High"].iloc[-1] + data["Low"].iloc[-1] + current_price) / 3
-            r1 = (2 * pivot) - data["Low"].iloc[-1]
-            s1 = (2 * pivot) - data["High"].iloc[-1]
-
-            # Suggested Stop Loss & Target
             if "BUY" in final_signal:
                 stop_loss = min(s1, current_price * 0.97)
-                target = current_price + (current_price - stop_loss) * 1.5
+                target = current_price + (current_price - stop_loss) * 1.8
             elif "SELL" in final_signal:
                 stop_loss = max(r1, current_price * 1.03)
-                target = current_price - (stop_loss - current_price) * 1.5
+                target = current_price - (stop_loss - current_price) * 1.8
             else:
                 stop_loss = s1
                 target = r1
@@ -194,7 +188,7 @@ if st.button("Get Future Trend", type="primary") or user_input:
             rc3.metric("Suggested Stop Loss", f"{stop_loss:.2f}")
             rc4.metric("Suggested Target", f"{target:.2f}")
 
-            # ========== VOLATILITY ==========
+            # Volatility
             st.subheader("📈 Volatility")
             returns = close.pct_change().dropna()
             vol_20 = returns.tail(20).std() * np.sqrt(252) * 100
@@ -210,32 +204,24 @@ if st.button("Get Future Trend", type="primary") or user_input:
                 except:
                     pass
 
-            # ========== CHART ==========
-            st.subheader("Price Chart + Indicators")
-
+            # Chart
+            st.subheader("Price Chart + EMAs + Support/Resistance")
             fig = go.Figure()
-
-            # Price
             fig.add_trace(go.Scatter(x=data.index, y=close, name="Price", line=dict(color="#1f77b4", width=2)))
-
-            # EMAs
             fig.add_trace(go.Scatter(x=data.index, y=data["EMA20"], name="EMA 20", line=dict(color="orange", width=1)))
             fig.add_trace(go.Scatter(x=data.index, y=data["EMA50"], name="EMA 50", line=dict(color="green", width=1)))
             fig.add_trace(go.Scatter(x=data.index, y=data["EMA200"], name="EMA 200", line=dict(color="red", width=1.5)))
-
-            # Support / Resistance
             fig.add_hline(y=s1, line_dash="dot", line_color="green", annotation_text="Support")
             fig.add_hline(y=r1, line_dash="dot", line_color="red", annotation_text="Resistance")
-
-            fig.update_layout(title=f"{user_input} - Price + EMA + S/R", height=500, hovermode="x unified")
+            fig.update_layout(title=f"{user_input} - Price + Indicators", height=520, hovermode="x unified")
             st.plotly_chart(fig, use_container_width=True)
 
-            # Disclaimer
             st.warning("""
-            **⚠️ Important Disclaimer**  
+            **⚠️ Disclaimer**  
             This tool is for **educational purposes only**.  
             It is **NOT financial advice**.  
-            Always do your own research and manage risk properly.
+            Past performance does not guarantee future results.  
+            Always manage your risk.
             """)
 
     except Exception as e:
